@@ -32,14 +32,14 @@ def main():
     a = np.random.randn(n).astype(np.float32)
     b = np.random.randn(n).astype(np.float32)
     
-    # 3. 为GPU结果分配内存
+
     d_a = cuda.to_device(a)
     d_b = cuda.to_device(b)
-    d_out = cuda.device_array_like(a)  # 在GPU上创建输出数组
+    d_out = cuda.device_array_like(a)
     
-    # 4. 配置CUDA执行参数（这是优化关键）
+    # 4. 配置CUDA执行参数
     threads_per_block = 256  # 每个block的线程数，常用值：128, 256, 512
-    blocks_per_grid = (n + threads_per_block - 1) // threads_per_block  # 计算需要的block数
+    blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
     
     print(f"CUDA config: {blocks_per_grid} blocks x {threads_per_block} threads")
     
