@@ -143,7 +143,7 @@ Bank conflicts are determined by:
 | fp16 | 2     | 2                 |
 | fp8  | 1     | 4                 |
 
-Lower-precision data types increase the likelihood of bank conflicts, unless special memory layouts or warp-level instructions are used.
+**Lower-precision data types increase the likelihood of bank conflicts**, unless special memory layouts or warp-level instructions are used.
 
 ## Insights
 
