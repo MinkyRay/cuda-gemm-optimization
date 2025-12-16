@@ -7,12 +7,10 @@
 #define PADDED_TILE_SIZE (TILE_SIZE + 1)
 
 
-// --------------------------------------------------------
-// CUDA Kernel: Tiled GEMM with Shared Memory Padding (V3)
-// --------------------------------------------------------
-__global__ void sgemm_tiled_padded(float *A, float *B, float *C, int M, int N, int K) {
-    
 
+// CUDA Kernel: Tiled GEMM with Shared Memory Padding
+
+__global__ void sgemm_tiled_padded(float *A, float *B, float *C, int M, int N, int K) {
 
     __shared__ float As[TILE_SIZE][PADDED_TILE_SIZE];// TILE_SIZE x PADDED_TILE_SIZE: pad 1 to avoid bank conflict in column access
     __shared__ float Bs[TILE_SIZE][PADDED_TILE_SIZE];
@@ -60,7 +58,7 @@ __global__ void sgemm_tiled_padded(float *A, float *B, float *C, int M, int N, i
 
         //Step2: Calculation As*Bs
         for (int k_inner = 0; k_inner < TILE_SIZE; ++k_inner){
-            Cvalue += As[ty][k_inner] * Bs[k_inner][tx]; // As row contiguous for reuse, Bs padded for bank conflict avoidance
+            Cvalue += As[ty][k_inner] * Bs[k_inner][tx];
         }
 
         __syncthreads();
@@ -72,74 +70,108 @@ __global__ void sgemm_tiled_padded(float *A, float *B, float *C, int M, int N, i
 }
 
 
+#define CHECK(call) \
+{ \
+    const cudaError_t error = call; \
+    if (error != cudaSuccess) \
+    { \
+        printf("Error: %s:%d, ", __FILE__, __LINE__); \
+        printf("code:%d, reason: %s\n", error, cudaGetErrorString(error)); \
+        exit(1); \
+    } \
+}
 
-// Host Code
-int main() {
-    int M = 1024;
-    int N = 1024;
-    int K = 1024;
-    size_t bytes_A = M * K * sizeof(float);
-    size_t bytes_B = K * N * sizeof(float);
-    size_t bytes_C = M * N * sizeof(float);
+// ==========================================
+// Main Function
+// ==========================================
+int main(int argc, char const *argv[]) {
 
+    int M = 4096;
+    int N = 4096;
+    int K = 4096;
+    if (argc > 1) {
+        M = atoi(argv[1]);
+        N = atoi(argv[2]);
+        K = atoi(argv[3]);
+    }
 
-    float *h_A = (float*)malloc(bytes_A);
-    float *h_B = (float*)malloc(bytes_B);
-    float *h_C = (float*)malloc(bytes_C);
-    
+    printf("Running Standard Tiled Padding GEMM Benchmark\n");
+    printf("Matrix Size: M=%d, N=%d, K=%d\n", M, N, K);
 
-    for(int i=0; i<M*K; i++) h_A[i] = 1.0f;
-    for(int i=0; i<K*N; i++) h_B[i] = 1.0f;
+    size_t size_A = M * K * sizeof(float);
+    size_t size_B = K * N * sizeof(float);
+    size_t size_C = M * N * sizeof(float);
 
+    // Host Memory
+    float *h_A = (float *)malloc(size_A);
+    float *h_B = (float *)malloc(size_B);
+    float *h_C = (float *)malloc(size_C);
 
+    // Initialization
+    for (int i = 0; i < M * K; i++) h_A[i] = 1.0f;
+    for (int i = 0; i < K * N; i++) h_B[i] = 1.0f;
+
+    // Device Memory
     float *d_A, *d_B, *d_C;
-    cudaMalloc(&d_A, bytes_A);
-    cudaMalloc(&d_B, bytes_B);
-    cudaMalloc(&d_C, bytes_C);
+    CHECK(cudaMalloc((void **)&d_A, size_A));
+    CHECK(cudaMalloc((void **)&d_B, size_B));
+    CHECK(cudaMalloc((void **)&d_C, size_C));
+
+    CHECK(cudaMemcpy(d_A, h_A, size_A, cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(d_B, h_B, size_B, cudaMemcpyHostToDevice));
+
+
+    dim3 block(16, 16); 
+    dim3 grid((N + 16 - 1) / 16, (M + 16 - 1) / 16);
     
-    cudaMemcpy(d_A, h_A, bytes_A, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_B, h_B, bytes_B, cudaMemcpyHostToDevice);
+    printf("Kernel Config: Grid=(%d, %d), Block=(%d, %d)\n", grid.x, grid.y, block.x, block.y);
 
-    // Launch configuration: Block Size = TILE_SIZE x TILE_SIZE
-    dim3 blockSize(TILE_SIZE, TILE_SIZE);
-    
-    // Grid Size
-    dim3 gridSize((N + TILE_SIZE - 1) / TILE_SIZE, 
-                  (M + TILE_SIZE - 1) / TILE_SIZE);
-
-
-    // Begin V3 Tiled Kernel
-
+    // Timing
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
-    printf("Computing... Grid size: (%d, %d)\n", gridSize.x, gridSize.y);
+    // Warmup
+    sgemm_tiled_padded<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
+    cudaDeviceSynchronize();
 
+    // Record
     cudaEventRecord(start);
-    
-    //V3 Tiled Kernel
-    sgemm_tiled_padded<<<gridSize, blockSize>>>(d_A, d_B, d_C, M, N, K);
-
+    for(int i=0; i<5; i++) { 
+        sgemm_tiled_padded<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
+    }
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
     float milliseconds = 0;
     cudaEventElapsedTime(&milliseconds, start, stop);
-    
-    // ==========================================
-    
-    cudaMemcpy(h_C, d_C, bytes_C, cudaMemcpyDeviceToHost);
-    
+    milliseconds /= 5.0f; 
 
-    printf("Result top-left: %f\n", h_C[0]);
-    printf("Time elapsed: %f ms\n", milliseconds);
-    
+    // Copy back
+    CHECK(cudaMemcpy(h_C, d_C, size_C, cudaMemcpyDeviceToHost));
 
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
+    // Verify
+    printf("Verifying...\n");
+    bool correct = true;
+    if (fabs(h_C[0] - (float)K) > 1e-4) correct = false;
+    if (fabs(h_C[M*N/2] - (float)K) > 1e-4) correct = false;
+    
+    if (correct) printf("RESULT: PASS\n");
+    else printf("RESULT: FAIL (Expected %f, Got %f)\n", (float)K, h_C[0]);
+
+    // Performance Calculation
+    double flops = 2.0 * (double)M * (double)N * (double)K;
+    double gflops = (flops / (milliseconds / 1000.0)) / 1e9;
+    printf("Time: %.3f ms\n", milliseconds);
+    printf("Performance: %.2f GFLOPS\n", gflops);
+    printf("Comparison:\n");
+    //printf("  Naive: ~700 GFLOPS\n");
+    //printf("  Your Best (Prefetch): ~7017 GFLOPS\n");
+
+    // Cleanup
     free(h_A); free(h_B); free(h_C);
     cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
+    cudaEventDestroy(start); cudaEventDestroy(stop);
 
     return 0;
 }
