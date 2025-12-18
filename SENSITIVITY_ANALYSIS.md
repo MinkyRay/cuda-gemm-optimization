@@ -92,14 +92,7 @@ Our benchmark reveals a distinct performance curve governed by the trade-off bet
 > 2.  **Macro-Latency Exposure (Low TLP):** Heavier threads consume more SM resources, reducing the total number of active Warps (Occupancy). With fewer Warps available to switch to, the SM loses the ability to hide the massive Global Memory latency (~400 cycles).
 ---
 
-## 4. Macro-Architecture Sensitivity: Block Tile Size
 
-This section investigates the impact of SM resource allocation, defined by the Shared Memory Block dimensions ($BM \times BN$), on performance.
-
-* **Controlled Variable:** Register Tile fixed at optimal $8 \times 8$.
-* **Independent Variable:** Block Tile Size ($32\times32$ to $256\times256$).
-
-### 4.1 Trade-off: Data Reuse vs. SM Concurrency
 
 ## 4. Macro-Architecture Sensitivity: Block Tile Size
 
