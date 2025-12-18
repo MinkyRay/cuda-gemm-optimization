@@ -52,31 +52,44 @@ One of the most profound findings is the massive performance gap (~2600 GFLOPS) 
 
 This section investigates the impact of thread-level work granularity, defined by the Register Tile dimensions ($TM \times TN$), on performance.
 
-* **Controlled Variable:** Block Tile Size fixed at $128 \times 128$.
-* **Independent Variable:** Register Tile Size ($2\times2$ to $16\times16$).
+* **Controlled Variable:** Block Tile Size fixed at $64 \times 64$.
+* **Independent Variable:** Register Tile Size ($4\times4$, $8\times8$, $16\times16$).
 
 ### 3.1 The "Inverted-U" Performance Curve
 
-Our benchmark reveals a distinct performance curve governed by the trade-off between **ILP** and **Register Pressure**.
+Our benchmark reveals a distinct performance curve governed by the trade-off between **Instruction Level Parallelism (ILP)** and **Register Pressure**.
 
-#### Regime I: Under-Utilization ($2\times2$, $4\times4$)
-* **Performance:** Suboptimal (~600 - 4500 GFLOPS).
+#### Regime I: Under-Utilization ($4\times4$)
+* **Performance:** Suboptimal (~4530 GFLOPS).
 * **Principle Violation:** **Insufficient Latency Hiding.**
-    * With small register tiles, the ratio of math instructions (FMA) to memory instructions (Load) is too low.
-    * Each thread issues too few independent instructions, preventing the Warp Scheduler from effectively covering the pipeline latency bubbles.
+    * With small register tiles ($TM \times TN = 16$), the ratio of math instructions (FMA) to memory instructions (Load) is too low.
+    * Each thread issues too few independent instructions between memory barriers, preventing the Warp Scheduler from effectively covering the pipeline latency bubbles.
 
 #### Regime II: The Sweet Spot ($8\times8$)
-* **Performance:** **Peak (~7000 GFLOPS).**
+* **Performance:** **Peak (~7010 GFLOPS).**
 * **Equilibrium:** **Optimal Balance.**
-    * **High ILP:** Each thread performs 64 FMA operations per iteration, providing a deep instruction queue for the scheduler.
-    * **Healthy Occupancy:** Register usage is high enough to maximize ILP but remains low enough (~80-100 registers/thread) to allow sufficient active Warps per SM. This enables the hardware to perform context switching during long-latency memory stalls.
+    * **High ILP:** Each thread performs 64 FMA operations per iteration, providing a deep, dependency-free instruction queue for the scheduler.
+    * **Healthy Occupancy:** Register usage (~80-100 registers/thread) is balanced. It allows enough Warps to remain active on the SM to perform context switching during long-latency memory stalls, while maximizing per-thread throughput.
 
-#### Regime III: Resource Exhaustion ($10\times10$, $12\times12$)
-* **Performance:** Collapse (< 2500 GFLOPS).
-* **Hardware Limit:** **Register Spilling & Occupancy Collapse.**
-    * **Spilling:** A $12\times12$ tile pushes register usage beyond the hardware limit per thread (255 registers). The compiler forces excess variables into **Local Memory** (high-latency DRAM), destroying *Temporal Locality*.
-    * **Low Occupancy:** The massive register footprint per thread depletes the SM's physical Register File. This limits the number of active warps to a critical low, leaving the SM pipeline idle during DRAM access stalls.
+#### Regime III: Resource Exhaustion ($16\times16$)
+* **Performance:** **Catastrophic Collapse (~229 GFLOPS).**
+* **Hardware Limit:** **Severe Register Spilling.**
+    * **Hard Constraint Violation:** The $C$ matrix accumulators alone require $16 \times 16 = 256$ registers, which strictly exceeds the Ada architecture's hardware limit per thread (255 registers).
+    * **The "DRAM" Penalty:** The compiler is forced to spill variables into **Local Memory**. This effectively degrades the register access speed to DRAM speed (Global Memory latency), causing performance to plummet by nearly 30x compared to the peak.
 
+---
+
+> **💡 Key Insight: The Double-Edged Sword of Thread Granularity**
+>
+> Increasing the thread weight (Register Block Size) creates a fundamental tension between ILP and TLP, characterized by two benefits and two penalties:
+>
+> **The Dual Benefits (Why Heavy Threads are Fast):**
+> 1.  **Surface-to-Volume Optimization (Higher AI):** Larger tiles ($8\times8$ vs $4\times4$) exponentially increase data reuse within the register file, strictly increasing the Arithmetic Intensity.
+> 2.  **Micro-Latency Hiding (High ILP):** Heavier threads generate a denser stream of independent math instructions, allowing a single Warp to self-hide Shared Memory latencies without needing to switch contexts.
+>
+> **The Dual Penalties (Why Heavy Threads Collapse):**
+> 1.  **Hard Constraint Violation (Spilling):** If the thread becomes too heavy ($16\times16$), it hits the physical register limit (255), forcing data into slow Local Memory.
+> 2.  **Macro-Latency Exposure (Low TLP):** Heavier threads consume more SM resources, reducing the total number of active Warps (Occupancy). With fewer Warps available to switch to, the SM loses the ability to hide the massive Global Memory latency (~400 cycles).
 ---
 
 ## 4. Macro-Architecture Sensitivity: Block Tile Size
@@ -88,22 +101,31 @@ This section investigates the impact of SM resource allocation, defined by the S
 
 ### 4.1 Trade-off: Data Reuse vs. SM Concurrency
 
-#### Small Blocks ($32\times32$)
-* **Performance:** ~3900 GFLOPS.
-* **Analysis:** **Low Spatial Locality Efficiency.**
-    * While this configuration enables high Occupancy, the small tile size results in redundant Global Memory accesses (lower Data Reuse rate), increasing pressure on the DRAM bandwidth.
+## 4. Macro-Architecture Sensitivity: Block Tile Size
 
-#### Optimal Blocks ($64\times64$)
-* **Performance:** **Peak (~7010 GFLOPS).**
-* **Analysis:** **High Concurrency.**
-    * This configuration strikes the best balance. The Shared Memory footprint is modest (~8KB-16KB), allowing the SM scheduler to launch multiple blocks concurrently.
-    * **High Active Block count** makes the kernel more resilient to memory latency bubbles via Thread-Level Parallelism (TLP).
+This section investigates the impact of SM resource allocation ($BM \times BN$) on performance. The results contradict the common heuristic that "larger tiles are always better," revealing a subtle micro-architectural trade-off on Ada Lovelace.
 
-#### Large Blocks ($128\times128$)
-* **Performance:** High (~6450 GFLOPS), but slightly degraded.
-* **Analysis:** **Limited Concurrency.**
-    * This configuration maximizes Data Reuse from Global Memory.
-    * However, the large Shared Memory requirement reduces the number of Active Blocks that can fit on a single SM. With fewer warps available for scheduling, the system is less able to hide latency.
+* **Controlled Variable:** Register Tile fixed at optimal $8 \times 8$.
+* **Independent Variable:** Block Tile Size ($32\times32$, $64\times64$, $128\times128$).
+
+### 4.1 Results Analysis
+
+| Block Size | Threads/Block | Performance (GFLOPS) | Analysis Summary |
+| :--- | :--- | :--- | :--- |
+| **$32 \times 32$** | 16 | ~3867 | **The "Half-Warp" Penalty.** With only 16 threads per block, the hardware executes a full 32-thread Warp but masks off 50% of the lanes. Half the compute capacity is wasted. |
+| **$64 \times 64$** | 64 | **~7009 (Peak)** | **The Sweet Spot (Granularity).** Small blocks mitigate "Register File Fragmentation," allowing higher SM Occupancy compared to larger blocks. |
+| **$128 \times 128$** | 256 | ~6457 | **Resource Fragmentation.** While data reuse is maximized, the "heavy" register footprint of a 256-thread block causes quantization loss in the Register File, reducing active warps. |
+
+### 4.2 Deep Dive: Why did 64x64 beat 128x128?
+
+The counter-intuitive victory of the smaller $64 \times 64$ block is driven by **Register File Fragmentation**.
+
+1.  **High Register Pressure:** Our optimal $8 \times 8$ Register Blocking kernel consumes significantly high registers (~80-100 per thread) to maintain the outer product accumulators.
+2.  **Granularity Issue:**
+    * **$128 \times 128$ (256 threads):** A single block consumes ~25,000 registers. An SM with 64K registers can only fit **2 blocks** (512 active threads). This results in low occupancy (~33%), leaving the SM scheduler with fewer warps to hide latency.
+    * **$64 \times 64$ (64 threads):** A single block consumes ~6,400 registers. An SM can fit **~10 blocks** (640 active threads). This **25% increase in Occupancy** provides better latency hiding capabilities, outweighing the benefits of improved global memory reuse.
+
+**Conclusion:** On register-heavy kernels (like Outer Product GEMM), smaller Block Tiles ($64\times64$) are often superior because they pack more efficiently into the SM's limited Register File, preventing resource stranding.
 
 #### Oversized Blocks ($256\times256$)
 * **Result:** **Kernel Launch Failure.**
