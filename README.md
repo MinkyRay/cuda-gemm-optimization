@@ -11,7 +11,7 @@
 
 This repository documents the step-by-step optimization journey of Single-Precision General Matrix Multiplication (SGEMM) on the NVIDIA Ada Lovelace architecture. 
 
-Starting from a naive implementation, we systematically apply micro-architectural optimizations—**Shared Memory Tiling**, **Register Blocking (Outer Product)**, and **Double Buffering (Async Copy)**—to achieve **~78% of the theoretical peak performance**.
+Starting from a naive implementation, we systematically apply micro-architectural optimizations—**Shared Memory Tiling**, **Register Blocking (Outer Product)**, **Register Blocking (Inner Product)**, and **Double Buffering (Async Copy)**—to achieve **~78% of the theoretical peak performance**.
 
 Crucially, this project goes beyond code. It includes detailed **Technical Reports** analyzing *why* these optimizations work, covering topics from Shared Memory Bank Conflicts to Instruction Level Parallelism (ILP).
 
