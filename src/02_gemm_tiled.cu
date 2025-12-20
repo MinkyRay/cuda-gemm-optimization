@@ -67,6 +67,7 @@ __global__ void sgemm_tiled_padded(float *A, float *B, float *C, int M, int N, i
     if (row < M && col < N){
         C[row*N + col] = Cvalue; // write final result
     }
+    //Avoid premature boundary checks that enclose the synchronization barrier to prevent block-level deadlocks(Barrier Synchronization Deadlock)
 }
 
 
