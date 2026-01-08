@@ -10,7 +10,7 @@
 
 // CUDA Kernel: Tiled GEMM with Shared Memory Padding
 
-__global__ void sgemm_tiled_padded(float *A, float *B, float *C, int M, int N, int K) {
+__global__ void sgemm_tiled_padded(const float *A, const float *B, float *C, int M, int N, int K) {
 
     __shared__ float As[TILE_SIZE][PADDED_TILE_SIZE];// TILE_SIZE x PADDED_TILE_SIZE: pad 1 to avoid bank conflict in column access
     __shared__ float Bs[TILE_SIZE][PADDED_TILE_SIZE];
