@@ -19,7 +19,7 @@
     } \
 }
 
-__global__ void sgemm_naive(float *A, float *B, float *C, int M, int N, int K) {
+__global__ void sgemm_naive(const float *A, const float *B, float *C, int M, int N, int K) {
     //step0: define global index
     int row = blockIdx.y * blockDim.y + threadIdx.y; 
     int col = blockIdx.x * blockDim.x + threadIdx.x;
