@@ -80,7 +80,7 @@ This is the core value of this repository. The following documents analyze the u
 ### Build & Run
 ```bash
 # Clone the repository
-git clone https://github.com/MinkyRay/cuda-gemm-optimization.git]
+git clone https://github.com/MinkyRay/cuda-gemm-optimization.git
 cd cuda-gemm-optimization
 
 # Build
